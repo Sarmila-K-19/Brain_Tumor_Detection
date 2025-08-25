@@ -1,78 +1,124 @@
 import streamlit as st
-import tensorflow as tf
-from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing.image import img_to_array
-from PIL import Image
+import torch
+import torch.nn as nn
 import numpy as np
-import json
-import matplotlib
+import cv2
+from torchvision import transforms
+from PIL import Image
 import matplotlib.pyplot as plt
 
-# Use Agg backend for Streamlit (safe for server apps)
-matplotlib.use("Agg")
+# -----------------------------
+# Define U-Net model
+# -----------------------------
+class UNet(nn.Module):
+    def __init__(self, in_channels=3, out_channels=1):
+        super(UNet, self).__init__()
 
-# ---------------------------
-# 1. Paths
-# ---------------------------
-MODEL_PATH = r"brain_tumor_mobilenetv2_final.h5"
-CLASSES_PATH = r"class_indices.json"
+        def CBR(in_ch, out_ch):
+            return nn.Sequential(
+                nn.Conv2d(in_ch, out_ch, 3, padding=1),
+                nn.BatchNorm2d(out_ch),
+                nn.ReLU(inplace=True)
+            )
 
-st.title("🧠 Brain Tumor Classification App")
+        self.enc1 = CBR(in_channels, 64)
+        self.enc2 = CBR(64, 128)
+        self.enc3 = CBR(128, 256)
+        self.enc4 = CBR(256, 512)
 
-# ---------------------------
-# 2. Load Model & Classes
-# ---------------------------
-@st.cache_resource
-def load_brain_model():
-    model = load_model(MODEL_PATH)
-    with open(CLASSES_PATH, "r") as f:
-        class_indices = json.load(f)
-    idx_to_class = {v: k for k, v in class_indices.items()}
-    return model, idx_to_class
+        self.pool = nn.MaxPool2d(2)
+        self.up = nn.ConvTranspose2d(512, 256, 2, stride=2)
 
-model, idx_to_class = load_brain_model()
-st.success("✅ Model loaded successfully!")
+        self.dec3 = CBR(512, 256)
+        self.dec2 = CBR(384, 128)
+        self.dec1 = CBR(192, 64)
+        self.out = nn.Conv2d(64, out_channels, 1)
 
-# ---------------------------
-# 3. File Uploader
-# ---------------------------
-uploaded_file = st.file_uploader("📤 Upload an MRI Image", type=["jpg", "jpeg", "png"])
+    def forward(self, x):
+        e1 = self.enc1(x)
+        e2 = self.enc2(self.pool(e1))
+        e3 = self.enc3(self.pool(e2))
+        e4 = self.enc4(self.pool(e3))
 
-# ---------------------------
-# 4. Prediction Function
-# ---------------------------
-def predict_single_image(img, target_size=(224, 224)):
-    # Resize and preprocess
-    img = img.resize(target_size)
-    img_array = img_to_array(img)
-    img_array = np.expand_dims(img_array, axis=0) / 255.0  # normalize
+        d3 = self.up(e4)
+        d3 = torch.cat([d3, e3], dim=1)
+        d3 = self.dec3(d3)
 
-    # Prediction
-    predictions = model.predict(img_array)
-    pred_idx = np.argmax(predictions[0])
-    pred_class = idx_to_class[pred_idx]
-    confidence = predictions[0][pred_idx] * 100
-    return pred_class, confidence, predictions[0]
+        d2 = nn.functional.interpolate(d3, scale_factor=2)
+        d2 = torch.cat([d2, e2], dim=1)
+        d2 = self.dec2(d2)
 
-# ---------------------------
-# 5. Handle Uploaded Image
-# ---------------------------
+        d1 = nn.functional.interpolate(d2, scale_factor=2)
+        d1 = torch.cat([d1, e1], dim=1)
+        d1 = self.dec1(d1)
+
+        out = torch.sigmoid(self.out(d1))
+        return out
+
+# -----------------------------
+# Load Model
+# -----------------------------
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = UNet().to(device)
+model.load_state_dict(torch.load("unet_brain_tumor_final.pth", map_location=device))
+model.eval()
+
+# -----------------------------
+# Image Transform
+# -----------------------------
+img_transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize([0.5,0.5,0.5],[0.5,0.5,0.5])
+])
+
+# -----------------------------
+# Streamlit UI
+# -----------------------------
+st.title("🧠 Brain Tumor Segmentation & Analysis")
+
+uploaded_file = st.file_uploader("Upload an MRI image", type=["jpg", "png", "jpeg"])
+
 if uploaded_file is not None:
+    # Load image
     image = Image.open(uploaded_file).convert("RGB")
-    st.image(image, caption="🖼 Uploaded MRI Image", use_column_width=True)
+    st.image(image, caption="Uploaded MRI", use_column_width=True)
 
-    pred_class, confidence, probs = predict_single_image(image)
+    # Preprocess
+    input_tensor = img_transform(image).unsqueeze(0).to(device)
 
-    st.subheader("🔍 Prediction Result")
-    st.write(f"👉 **Predicted Tumor Type:** {pred_class}")
-    st.metric(label="📊 Confidence", value=f"{confidence:.2f}%")
+    # Predict
+    with torch.no_grad():
+        output = model(input_tensor)
+        pred_mask = (output.squeeze().cpu().numpy() > 0.5).astype("uint8")
 
-    # Probability bar chart
-    st.subheader("📈 Probability Distribution")
-    class_labels = [idx_to_class[i] for i in range(len(idx_to_class))]
-    fig, ax = plt.subplots()
-    ax.bar(class_labels, probs * 100, color="skyblue")
-    ax.set_ylabel("Confidence (%)")
-    ax.set_xlabel("Classes")
-    ax.set_title("Prediction Probabilities")
-    st.pyplot(fig)
+    # -----------------------------
+    # Process Tumor Mask
+    # -----------------------------
+    # Find connected components
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(pred_mask.astype("uint8"), connectivity=8)
+
+    if num_labels > 1:  # background + tumors
+        largest_idx = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])  # ignore background
+        tumor_mask = (labels == largest_idx).astype("uint8")
+
+        tumor_size = stats[largest_idx, cv2.CC_STAT_AREA]
+        x, y, w, h, _ = stats[largest_idx]
+        cx, cy = centroids[largest_idx]
+
+        st.subheader("📊 Tumor Analysis")
+        st.write(f"🟢 Tumor Size (pixels): **{tumor_size}**")
+        st.write(f"📍 Tumor Location (Bounding Box): x={x}, y={y}, w={w}, h={h}")
+        st.write(f"🎯 Tumor Centroid: ({int(cx)}, {int(cy)})")
+
+        # -----------------------------
+        # Heatmap Overlay
+        # -----------------------------
+        img_np = np.array(image)
+        heatmap = cv2.applyColorMap((tumor_mask*255).astype(np.uint8), cv2.COLORMAP_JET)
+        overlay = cv2.addWeighted(img_np, 0.7, heatmap, 0.3, 0)
+
+        st.subheader("🔥 Heatmap Visualization")
+        st.image(overlay, caption="Tumor Heatmap", use_column_width=True)
+
+    else:
+        st.warning("No tumor detected in this image.")
