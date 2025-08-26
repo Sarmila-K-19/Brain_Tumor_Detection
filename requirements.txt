@@ -1,8 +1,0 @@
-streamlit
-tensorflow
-torch
-torchvision
-numpy
-opencv-python
-Pillow
-matplotlib
