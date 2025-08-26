@@ -3,16 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <title>Tumor Segmentation</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     
     <style>
+        body {
+    margin: 0;
+    padding: 0;
+    background: url("{{ url_for('static', filename='bg.jpg') }}") no-repeat center center fixed !important;
+    background-size: cover !important;
+    font-family: Arial, sans-serif;
+    text-align: center;
+}
         body {
             font-family: Arial, sans-serif;
             background: #f5f5f5;
             text-align: center;
         }
-        h2 {
-            color: #333;
-        }
+        
         .images {
             display: flex;
             justify-content: center;
@@ -21,7 +28,7 @@
             margin-top: 20px;
         }
         .img-box {
-            background: white;
+            
             padding: 10px;
             border-radius: 10px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.2);
@@ -41,7 +48,8 @@
     </style>
 </head>
 <body>
-    <h2>Brain Tumor Segmentation Results</h2>
+    <div class="container">
+    <h2 style:color="White">Brain Tumor Segmentation Results</h2>
 
     <div class="images">
         <div class="img-box">
@@ -83,6 +91,7 @@
     <form method="GET" action="{{ url_for('download_report') }}" style="display:inline;">
         <button type="submit">Download Report (PDF)</button>
     </form>
+</div>
 </div>
 </body>
 </html>
