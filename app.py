@@ -32,7 +32,7 @@ def fetch_tumor_definition(tumor_type):
         "Authorization": f"Bearer {TOGETHER_AI_API_KEY}",
         "Content-Type": "application/json"
     }
-    prompt = f"Give a concise medical definition of the brain tumor type: {tumor_type}."
+    prompt = f"Give a concise medical definition of the brain tumor type: {tumor_type}.dont mention anywhere as ai genrated."
     data = {
         "model": TOGETHER_AI_MODEL,
         "messages": [{"role": "user", "content": prompt}]
@@ -241,7 +241,7 @@ def download_report():
         f"The scan analysis indicates a {pred_class} tumor in the brain. "
         f"The tumor size is {tumor_size} pixels, covering approximately {tumor_percentage:.2f}% of the brain area. "
         f"It is located at the {tumor_location} region.\n\n"
-        f"Tumor Information (AI-generated): {tumor_info_summary}\n"
+        f"Tumor Information: {tumor_info_summary}\n"
         "Medical evaluation and follow-up are recommended for further management."
     )
 
