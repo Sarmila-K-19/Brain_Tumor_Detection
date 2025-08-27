@@ -22,7 +22,7 @@ UPLOAD_FOLDER = "static/uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # Together AI API
-TOGETHER_AI_API_KEY = "2a48e42d7ca4affd4632be01b4a6edcf3cb8864467bc26ba18500ce3a0d11c3d"  # Replace with your actual key
+TOGETHER_AI_API_KEY = "2a48e42d7ca4affd4632be01b4a6edcf3cb8864467bc26ba18500ce3a0d11c3d"
 TOGETHER_AI_ENDPOINT = "https://api.together.xyz/v1/chat/completions"
 TOGETHER_AI_MODEL = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
 
@@ -32,7 +32,7 @@ def fetch_tumor_definition(tumor_type):
         "Authorization": f"Bearer {TOGETHER_AI_API_KEY}",
         "Content-Type": "application/json"
     }
-    prompt = f"Give a concise medical definition of the brain tumor type: {tumor_type}.dont mention anywhere as ai genrated."
+    prompt = f"Give a concise medical definition of the brain tumor type: {tumor_type}. Dont mention anywhere as AI generated."
     data = {
         "model": TOGETHER_AI_MODEL,
         "messages": [{"role": "user", "content": prompt}]
@@ -118,10 +118,21 @@ def upload():
     if request.method == "POST":
         file = request.files["file"]
         if file:
+            # --- Reset session ---
+            session.clear()
+
+            # --- Delete old generated files ---
+            for fname in ["tumor_mask.png", "heatmap.png", "tumor_bbox.png", "tumor_report.pdf"]:
+                fpath = os.path.join(UPLOAD_FOLDER, fname)
+                if os.path.exists(fpath):
+                    os.remove(fpath)
+
+            # --- Save new file ---
             filepath = os.path.join(UPLOAD_FOLDER, file.filename)
             file.save(filepath)
             session['uploaded_file'] = filepath
             return redirect(url_for('classification'))
+
     return render_template("upload.html")
 
 @app.route("/classification")
